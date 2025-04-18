@@ -6,6 +6,11 @@ import typing as t
 
 from singer_sdk import typing as th  # JSON Schema typing helpers
 
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 from tap_hubspot.client import (
     DynamicIncrementalHubspotStream,
     HubspotStream,
@@ -1204,7 +1209,38 @@ class CompanyStream(DynamicIncrementalHubspotStream):
     def url_base(self) -> str:
         """Returns an updated path which includes the api version."""
         return "https://api.hubapi.com/crm/v3"
+    
+    def post_process(
+            self, 
+            row: dict[Any, Any], 
+            _context: "Mapping[str, Any] | None" = None,
+        ) -> dict[Any, Any] | None:
+        """Filter the 'properties' field to only keep selected fields."""
+        props = row.get("properties", {}) or {}
+        filter_field = self.config.get('filter_field')
+        filter_field_value = props.get(filter_field)
 
+        if not filter_field_value:
+            return None
+
+        try:
+            keys_to_keep = self.config.get('fields', [])
+            filtered_props = {key: props[key] for key in keys_to_keep if key in props}
+
+            missing_keys = [key for key in keys_to_keep if key not in props]
+            if missing_keys:
+                self.logger.warning("Missing keys in properties: %s", missing_keys)
+
+            row["properties"] = filtered_props
+
+            if self.replication_key:
+                row[self.replication_key] = props.get(self.replication_key)
+
+        except Exception as e:
+            self.logger.exception("Error while filtering properties")
+            raise
+
+        return row
 
 class DealStream(DynamicIncrementalHubspotStream):
     """https://developers.hubspot.com/docs/api/crm/deals."""
