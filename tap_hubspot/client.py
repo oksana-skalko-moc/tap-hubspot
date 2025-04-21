@@ -118,7 +118,7 @@ class HubspotStream(RESTStream):
             A dictionary of URL query parameters.
         """
         params: dict = {}
-        params["limit"] = 100
+        params["limit"] = 200
         if next_page_token:
             params["after"] = next_page_token
         if self.replication_key:
@@ -350,7 +350,7 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
                         },
                     ],
                     # Hubspot sets a limit of most 100 per request. Default is 10
-                    "limit": 100,
+                    "limit": 200,
                     "properties": list(self.hs_properties),
                 },
             )
