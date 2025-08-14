@@ -1210,6 +1210,19 @@ class CompanyStream(DynamicIncrementalHubspotStream):
         """Returns an updated path which includes the api version."""
         return "https://api.hubapi.com/crm/v3"
     
+    def get_url_params(
+        self,
+        context: Context | None,
+        next_page_token: int | None,
+    ) -> dict[str, t.Any]:
+        """Add propertiesWithHistory parameter based on config fields."""
+        params = super().get_url_params(context, next_page_token)
+
+        fields_with_history = self.config.get('fields', [])
+        if fields_with_history:
+            params["propertiesWithHistory"] = ",".join(fields_with_history)
+        return params
+    
     def post_process(
             self, 
             row: dict[Any, Any], 
