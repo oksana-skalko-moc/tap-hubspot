@@ -1202,7 +1202,7 @@ class CompanyStream(DynamicIncrementalHubspotStream):
     incremental_path = "/objects/companies/search"
     primary_keys = ("id",)
     replication_key = "hs_lastmodifieddate"
-    replication_method = "INCREMENTAL"
+    replication_method = "FULL_TABLE" 
     records_jsonpath = "$[results][*]"  # Or override `parse_response`.
 
     @property
