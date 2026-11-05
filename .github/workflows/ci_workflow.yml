@@ -31,7 +31,8 @@ jobs:
 
   pytest:
 
-    runs-on: ubuntu-latest
+    # ubuntu-latest (26.04) has no Python 3.9 build available
+    runs-on: ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
     strategy:

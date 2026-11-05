@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import sys
 import typing as t
 from functools import cached_property
@@ -310,7 +310,7 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
         if self._is_incremental_search(context):
             # Only filter in case we have a value to filter on
             # https://developers.hubspot.com/docs/api/crm/search
-            ts = datetime.datetime.fromisoformat(
+            ts = dt.datetime.fromisoformat(
                 self.get_starting_replication_key_value(context),  # type: ignore[arg-type]
             )
             if next_page_token:
