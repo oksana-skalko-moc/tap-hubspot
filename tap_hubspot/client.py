@@ -311,7 +311,7 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
         self,
         response: requests.Response,
         previous_token: int | None,
-    ) -> int | str | None:
+    ) -> int | None:
         """Return the next page token (the last id when paging the search by id)."""
         if self.search_paginate_by_object_id and self._search_active:
             results = response.json().get("results") or []
