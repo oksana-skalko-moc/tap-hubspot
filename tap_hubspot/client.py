@@ -184,16 +184,34 @@ class DynamicHubspotStream(HubspotStream):
             A dictionary of URL query parameters.
         """
         params = super().get_url_params(context, next_page_token)
-        if self.hs_properties:
-            params["properties"] = ",".join(self.hs_properties)
+        if properties := self._requested_properties():
+            params["properties"] = ",".join(properties)
         return params
+
+    def _requested_properties(self) -> list[str]:
+        """Properties to ask HubSpot for (all of them unless a stream narrows it)."""
+        return list(self.hs_properties)
 
 
 class DynamicIncrementalHubspotStream(DynamicHubspotStream):
     """DynamicIncrementalHubspotStream."""
 
+    # Search endpoints return at most 200 records per request.
+    search_page_size = 200
+
+    # When True the search is paged with a `hs_object_id > <last id>` cursor instead of
+    # `after` offsets (HubSpot returns at most 10k results per query, and the offset
+    # workaround depends on the bookmark advancing, which it does not when records are
+    # filtered out client-side).
+    search_paginate_by_object_id = False
+
     def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:  # noqa: D107
         super().__init__(*args, **kwargs)
+        self._search_active = False
+
+    def _extra_search_filters(self) -> list[dict[str, t.Any]]:
+        """Additional filters (ANDed) for the search request."""
+        return []
 
     def _is_incremental_search(self, context: Context | None) -> bool:
         return (
@@ -282,11 +300,25 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
         context: Context | None,
         next_page_token: int | None,
     ) -> requests.PreparedRequest:
-        if self._is_incremental_search(context):
+        self._search_active = bool(self._is_incremental_search(context))
+        if self._search_active:
             # Search endpoints use POST request
             self.path = self.incremental_path  # type: ignore[attr-defined]
             self.http_method = "POST"
         return super().prepare_request(context, next_page_token)
+
+    def get_next_page_token(
+        self,
+        response: requests.Response,
+        previous_token: int | None,
+    ) -> int | str | None:
+        """Return the next page token (the last id when paging the search by id)."""
+        if self.search_paginate_by_object_id and self._search_active:
+            results = response.json().get("results") or []
+            if len(results) < self.search_page_size:
+                return None
+            return results[-1]["id"]
+        return super().get_next_page_token(response, previous_token)
 
     def prepare_request_payload(
         self,
@@ -307,6 +339,8 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
                 next page of data.
         """
         body: dict[str, t.Any] = {}
+        if self._is_incremental_search(context) and self.search_paginate_by_object_id:
+            return self._search_payload_by_object_id(context, next_page_token)
         if self._is_incremental_search(context):
             # Only filter in case we have a value to filter on
             # https://developers.hubspot.com/docs/api/crm/search
@@ -351,8 +385,51 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
                     ],
                     # Hubspot sets a limit of most 100 per request. Default is 10
                     "limit": 200,
-                    "properties": list(self.hs_properties),
+                    "properties": self._requested_properties(),
                 },
             )
 
         return body
+
+    def _search_payload_by_object_id(
+        self,
+        context: Context | None,
+        next_page_token: int | str | None,
+    ) -> dict[str, t.Any]:
+        """Search payload paged with an `hs_object_id` cursor (no 10k offset limit)."""
+        ts = dt.datetime.fromisoformat(
+            self.get_starting_replication_key_value(context),  # type: ignore[arg-type]
+        )
+        if not next_page_token:
+            state = self.get_context_state(context)
+            has_bookmark = bool(state.get("replication_key_value"))
+            source = "state bookmark" if has_bookmark else "start_date"
+            self.logger.info(
+                "Incremental search of '%s' starts from %s (%s)",
+                self.name,
+                ts.isoformat(),
+                source,
+            )
+        filters: list[dict[str, t.Any]] = [
+            {
+                "propertyName": self.replication_key,
+                "operator": "GTE",
+                # Timestamps need to be in milliseconds
+                "value": str(int(ts.timestamp() * 1000)),
+            },
+            *self._extra_search_filters(),
+        ]
+        if next_page_token:
+            filters.append(
+                {
+                    "propertyName": "hs_object_id",
+                    "operator": "GT",
+                    "value": str(next_page_token),
+                },
+            )
+        return {
+            "filterGroups": [{"filters": filters}],
+            "sorts": [{"propertyName": "hs_object_id", "direction": "ASCENDING"}],
+            "limit": self.search_page_size,
+            "properties": self._requested_properties(),
+        }

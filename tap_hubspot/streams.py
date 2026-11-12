@@ -1210,6 +1210,30 @@ class CompanyStream(DynamicIncrementalHubspotStream):
         """Returns an updated path which includes the api version."""
         return "https://api.hubapi.com/crm/v3"
 
+    # page the search by hs_object_id: no 10k limit and no dependence on the bookmark
+    search_paginate_by_object_id = True
+
+    def _requested_properties(self) -> list[str]:
+        """Ask HubSpot only for the configured fields plus what the tap itself needs.
+
+        createdAt / updatedAt / archived are top-level fields that HubSpot returns with
+        every object, so they are not (and cannot be) requested as properties.
+        """
+        fields = self.config.get("fields") or []
+        if not fields:
+            return super()._requested_properties()
+        needed = [*fields, self.replication_key, self.config.get("filter_field")]
+        return list(dict.fromkeys(name for name in needed if name))
+
+    def _extra_search_filters(self) -> list[dict[str, t.Any]]:
+        """Make the search return only records that have a `filter_field` value.
+
+        This only narrows what HubSpot returns to us; nothing is changed or deleted.
+        """
+        if filter_field := self.config.get("filter_field"):
+            return [{"propertyName": filter_field, "operator": "HAS_PROPERTY"}]
+        return []
+
     def post_process(
             self, 
             row: dict[Any, Any], 
