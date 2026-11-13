@@ -315,9 +315,34 @@ class DynamicIncrementalHubspotStream(DynamicHubspotStream):
         """Return the next page token (the last id when paging the search by id)."""
         if self.search_paginate_by_object_id and self._search_active:
             results = response.json().get("results") or []
+            if previous_token is None:
+                self._search_pages = 0
+            self._search_pages = getattr(self, "_search_pages", 0) + 1
             if len(results) < self.search_page_size:
+                self.logger.info(
+                    "Search of '%s' finished after %d pages",
+                    self.name,
+                    self._search_pages,
+                )
                 return None
-            return results[-1]["id"]
+            last_id = max(int(r["id"]) for r in results)
+            if previous_token is not None and last_id <= int(previous_token):
+                self.logger.warning(
+                    "Search of '%s' stopped: cursor did not advance (last id %s, "
+                    "previous %s) - results are not ordered by hs_object_id",
+                    self.name,
+                    last_id,
+                    previous_token,
+                )
+                return None
+            if self._search_pages % 50 == 0:
+                self.logger.info(
+                    "Search of '%s': page %d, cursor hs_object_id=%s",
+                    self.name,
+                    self._search_pages,
+                    last_id,
+                )
+            return last_id
         return super().get_next_page_token(response, previous_token)
 
     def prepare_request_payload(
